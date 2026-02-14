@@ -1,4 +1,4 @@
-import Ajv from "ajv";
+import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import type { ValidationResult, ValidationError, ValidationSeverity } from "./types.ts";
 
@@ -31,10 +31,18 @@ export function invalidateSchemaCache(): void {
   cachedAt = 0;
 }
 
-// ─── Ajv Instance ────────────────────────────────────────────────
+// ─── Ajv Instance with remote schema loading ─────────────────────
 
-function createAjv(): Ajv {
-  const ajv = new Ajv({ allErrors: true, strict: false });
+function createAjv(): Ajv2020 {
+  const ajv = new Ajv2020({
+    allErrors: true,
+    strict: false,
+    loadSchema: async (uri: string) => {
+      const res = await fetch(uri);
+      if (!res.ok) throw new Error(`Failed to fetch schema: ${uri}`);
+      return (await res.json()) as object;
+    },
+  });
   addFormats(ajv);
   return ajv;
 }
@@ -81,25 +89,39 @@ export async function validateConfig(
     };
   }
 
-  const ajv = createAjv();
-  const validate = ajv.compile(schema);
-  const valid = validate(config) as boolean;
+  try {
+    const ajv = createAjv();
+    // compileAsync resolves remote $ref schemas automatically
+    const validate = await ajv.compileAsync(schema);
+    const valid = validate(config) as boolean;
 
-  if (valid) {
-    return { valid: true, errors: [] };
+    if (valid) {
+      return { valid: true, errors: [] };
+    }
+
+    const errors: ValidationError[] = (validate.errors ?? []).map((err) => ({
+      path: err.instancePath || "/",
+      message: err.message ?? "Unknown validation error",
+      severity: "error" as ValidationSeverity,
+      suggestion: generateSuggestion({
+        keyword: err.keyword,
+        instancePath: err.instancePath,
+        params: (err.params ?? {}) as Record<string, unknown>,
+        message: err.message ?? undefined,
+      }),
+    }));
+
+    return { valid: false, errors };
+  } catch (err) {
+    return {
+      valid: true,
+      errors: [
+        {
+          path: "",
+          message: `Schema compilation failed: ${err instanceof Error ? err.message : String(err)}`,
+          severity: "warning" as ValidationSeverity,
+        },
+      ],
+    };
   }
-
-  const errors: ValidationError[] = (validate.errors ?? []).map((err) => ({
-    path: err.instancePath || "/",
-    message: err.message ?? "Unknown validation error",
-    severity: "error" as ValidationSeverity,
-    suggestion: generateSuggestion({
-      keyword: err.keyword,
-      instancePath: err.instancePath,
-      params: (err.params ?? {}) as Record<string, unknown>,
-      message: err.message ?? undefined,
-    }),
-  }));
-
-  return { valid: false, errors };
 }
