@@ -5,6 +5,21 @@ import { markSelfWrite } from "./file-watcher.ts";
 import { getSkillScanDirs, getAgentScanDirs } from "./path-resolver.ts";
 import type { Skill, SkillFrontmatter, Agent, AgentFrontmatter, ConfigScope } from "./types.ts";
 
+// ─── Helpers ─────────────────────────────────────────────────────
+
+function isDir(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function inferScope(dir: string): ConfigScope {
+  if (dir.includes(".opencode") || dir.includes(".claude")) return "project";
+  return "global";
+}
+
 // ─── Skill Parsing ───────────────────────────────────────────────
 
 export function parseSkillFile(path: string, scope: ConfigScope): Skill | null {
@@ -19,34 +34,21 @@ export function parseSkillFile(path: string, scope: ConfigScope): Skill | null {
   }
 }
 
-export function listAllSkills(): Skill[] {
-  const seen = new Map<string, Skill>();
-  const dirs = getSkillScanDirs();
+function scanSkillDir(dir: string, seen: Map<string, Skill>): void {
+  if (!existsSync(dir)) return;
+  const scope = inferScope(dir);
 
-  for (const dir of dirs) {
-    if (!existsSync(dir)) continue;
-    const scope = dir.includes(".opencode") || dir.includes(".claude")
-      ? "project" as ConfigScope
-      : "global" as ConfigScope;
+  try {
+    const entries = readdirSync(dir);
+    for (const name of entries) {
+      if (name.startsWith(".")) continue;
+      const fullPath = join(dir, name);
 
-    try {
-      const entries = readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          // Look for SKILL.md inside subdirectory
-          const skillFile = join(dir, entry.name, "SKILL.md");
-          if (existsSync(skillFile)) {
-            const skill = parseSkillFile(skillFile, scope);
-            if (skill) {
-              // Project scope overrides global
-              const existing = seen.get(skill.frontmatter.name);
-              if (!existing || scope === "project") {
-                seen.set(skill.frontmatter.name, skill);
-              }
-            }
-          }
-        } else if (entry.name.endsWith(".md")) {
-          const skill = parseSkillFile(join(dir, entry.name), scope);
+      // Use statSync to follow symlinks
+      if (isDir(fullPath)) {
+        const skillFile = join(fullPath, "SKILL.md");
+        if (existsSync(skillFile)) {
+          const skill = parseSkillFile(skillFile, scope);
           if (skill) {
             const existing = seen.get(skill.frontmatter.name);
             if (!existing || scope === "project") {
@@ -54,12 +56,26 @@ export function listAllSkills(): Skill[] {
             }
           }
         }
+      } else if (name.endsWith(".md")) {
+        const skill = parseSkillFile(fullPath, scope);
+        if (skill) {
+          const existing = seen.get(skill.frontmatter.name);
+          if (!existing || scope === "project") {
+            seen.set(skill.frontmatter.name, skill);
+          }
+        }
       }
-    } catch {
-      // Directory unreadable
     }
+  } catch {
+    // Directory unreadable
   }
+}
 
+export function listAllSkills(): Skill[] {
+  const seen = new Map<string, Skill>();
+  for (const dir of getSkillScanDirs()) {
+    scanSkillDir(dir, seen);
+  }
   return Array.from(seen.values());
 }
 
@@ -103,14 +119,16 @@ export function listAllAgents(): Agent[] {
 
   for (const dir of dirs) {
     if (!existsSync(dir)) continue;
-    const scope = dir.includes(".opencode") ? "project" as ConfigScope : "global" as ConfigScope;
+    const scope = inferScope(dir);
 
     try {
       const entries = readdirSync(dir);
       for (const entry of entries) {
         if (!entry.endsWith(".md")) continue;
         const fullPath = join(dir, entry);
-        if (!statSync(fullPath).isFile()) continue;
+        try {
+          if (!statSync(fullPath).isFile()) continue;
+        } catch { continue; }
 
         const agent = parseAgentFile(fullPath, scope);
         if (agent) {

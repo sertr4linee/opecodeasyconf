@@ -134,6 +134,9 @@ export function getSkillScanDirs(): string[] {
   const globalDir = getGlobalConfigDir();
   dirs.push(join(globalDir, "skills"));
 
+  // Shared skills library
+  dirs.push(join(homedir(), ".agents", "skills"));
+
   // Also check ~/.claude/skills for compatibility
   dirs.push(join(homedir(), ".claude", "skills"));
 
