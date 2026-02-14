@@ -3,7 +3,7 @@ import { join, resolve, dirname } from "path";
 import { homedir, platform } from "os";
 import type { ConfigScope, ResolvedPaths } from "./types.ts";
 
-const CONFIG_FILENAMES = ["opencode.jsonc", "opencode.json"] as const;
+const CONFIG_FILENAMES = ["opencode.jsonc", "opencode.json", "config.jsonc", "config.json"] as const;
 const PROJECT_DIR_NAME = ".opencode";
 
 // ─── Platform-aware directory resolution ─────────────────────────
@@ -14,7 +14,12 @@ export function getGlobalConfigDir(): string {
 
   const plat = platform();
   if (plat === "darwin") {
-    return join(homedir(), "Library", "Application Support", "opencode");
+    // Prefer ~/Library/Application Support/opencode/ but fall back to ~/.config/opencode/
+    const appSupport = join(homedir(), "Library", "Application Support", "opencode");
+    const dotConfig = join(homedir(), ".config", "opencode");
+    if (existsSync(appSupport)) return appSupport;
+    if (existsSync(dotConfig)) return dotConfig;
+    return appSupport; // default for new installs
   }
   if (plat === "win32") {
     return join(process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming"), "opencode");

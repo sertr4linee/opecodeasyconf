@@ -1,6 +1,9 @@
 import { existsSync } from "fs";
 import { join, extname } from "path";
 import { WebSocketManager } from "./ws-manager.ts";
+import { loadAllConfigs } from "../core/config-engine.ts";
+import { resolveAllPaths } from "../core/path-resolver.ts";
+import { listAllSkills, listAllAgents } from "../core/parsers.ts";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -13,7 +16,54 @@ const MIME_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
+const JSON_HEADERS = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+
 export const wsManager = new WebSocketManager();
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
+}
+
+// ─── API Router ──────────────────────────────────────────────────
+
+function handleApi(pathname: string): Response {
+  switch (pathname) {
+    case "/api/config": {
+      const { merged, scopes } = loadAllConfigs();
+      return json({
+        merged,
+        scopes: scopes.map((s) => ({
+          scope: s.scope,
+          filePath: s.filePath,
+          config: s.config,
+        })),
+      });
+    }
+    case "/api/config/paths": {
+      return json(resolveAllPaths());
+    }
+    case "/api/mcp": {
+      const { merged, scopes } = loadAllConfigs();
+      const servers = merged.mcp ?? {};
+      // Attach source scope to each server
+      const enriched = Object.entries(servers).map(([name, config]) => {
+        const sourceScope = scopes.find((s) => s.config.mcp?.[name])?.scope ?? "unknown";
+        return { name, ...config, sourceScope };
+      });
+      return json(enriched);
+    }
+    case "/api/skills": {
+      return json(listAllSkills());
+    }
+    case "/api/agents": {
+      return json(listAllAgents());
+    }
+    default:
+      return json({ error: "Not found" }, 404);
+  }
+}
+
+// ─── HTTP Server ─────────────────────────────────────────────────
 
 export function startHttpServer(port: number): void {
   const staticDir = join(import.meta.dir, "../../dist/web");
@@ -32,18 +82,12 @@ export function startHttpServer(port: number): void {
 
       // MCP HTTP endpoint (Phase 2)
       if (url.pathname.startsWith("/mcp")) {
-        return new Response(JSON.stringify({ status: "not implemented" }), {
-          status: 501,
-          headers: { "Content-Type": "application/json" },
-        });
+        return json({ status: "not implemented" }, 501);
       }
 
-      // REST API (Phase 2)
+      // REST API
       if (url.pathname.startsWith("/api/")) {
-        return new Response(JSON.stringify({ status: "not implemented" }), {
-          status: 501,
-          headers: { "Content-Type": "application/json" },
-        });
+        return handleApi(url.pathname);
       }
 
       // Static files / SPA fallback
@@ -66,7 +110,6 @@ export function startHttpServer(port: number): void {
 }
 
 function serveStatic(pathname: string, staticDir: string): Response {
-  // Try exact file
   let filePath = join(staticDir, pathname);
   if (existsSync(filePath) && !Bun.file(filePath).name?.endsWith("/")) {
     const ext = extname(filePath);
@@ -75,7 +118,6 @@ function serveStatic(pathname: string, staticDir: string): Response {
     });
   }
 
-  // SPA fallback — serve index.html
   filePath = join(staticDir, "index.html");
   if (existsSync(filePath)) {
     return new Response(Bun.file(filePath), {
