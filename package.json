@@ -1,17 +1,25 @@
 {
-  "name": "opecodeasyconf",
-  "module": "index.ts",
+  "name": "opconf",
+  "version": "0.1.0",
+  "module": "src/entry.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "dev:server": "bun run --watch src/entry.ts",
+    "dev:client": "vite",
+    "dev": "bun run dev:server & bun run dev:client",
+    "build": "vite build",
+    "start": "bun run src/entry.ts",
+    "compile": "vite build && bun build --compile src/entry.ts --outfile opconf",
+    "typecheck": "tsc --noEmit"
+  },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@types/bun": "latest",
     "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vite-plugin-solid": "^2.11.10"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
   },
   "dependencies": {
     "@kobalte/core": "^0.13.11",
